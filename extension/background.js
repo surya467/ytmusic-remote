@@ -36,7 +36,13 @@ function initConfig(callback) {
     }
 
     if (res.webAppUrl) {
-      webAppUrl = res.webAppUrl;
+      const match = res.webAppUrl.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/?$/i);
+      if (match) {
+        webAppUrl = `https://${match[1]}.github.io/${match[2]}`;
+        chrome.storage.local.set({ webAppUrl });
+      } else {
+        webAppUrl = res.webAppUrl;
+      }
     }
 
     console.log(`[Background] Initialized Room: ${roomId}`);

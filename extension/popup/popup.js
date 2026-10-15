@@ -132,8 +132,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   saveSettingsBtn.addEventListener('click', () => {
-    const newUrl = webAppUrlInput.value.trim();
+    let newUrl = webAppUrlInput.value.trim();
     if (newUrl) {
+      // Auto-correct github.com repository link to github.io pages link if user entered github.com
+      const ghRepoMatch = newUrl.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/?$/i);
+      if (ghRepoMatch) {
+        newUrl = `https://${ghRepoMatch[1]}.github.io/${ghRepoMatch[2]}`;
+      }
+
       chrome.runtime.sendMessage({ action: 'SET_WEBAPP_URL', url: newUrl }, (res) => {
         settingsPanel.style.display = 'none';
         fetchStatus();
