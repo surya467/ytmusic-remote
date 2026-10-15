@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "YT Music Mobile Remote",
+  "version": "1.0.0",
+  "description": "Control desktop YouTube Music from your phone anywhere, like Spotify Connect",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "YT Music Remote"
+  },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://music.youtube.com/*",
+    "wss://broker.hivemq.com/*",
+    "wss://broker.emqx.io/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#121212">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>YT Music Remote</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23FF0000'/><polygon points='40,32 70,50 40,68' fill='white'/></svg>">
+  <style>
+    :root {
+      --bg: #121212;
+      --card-bg: rgba(255, 255, 255, 0.06);
+      --accent: #ff0000;
+      --accent-glow: rgba(255, 0, 0, 0.35);
+      --green: #1db954;
+      --text: #ffffff;
+      --text-muted: #b3b3b3;
+      --text-sub: #727272;
+      --progress-bg: rgba(255, 255, 255, 0.18);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Ambient blurred album background */
+    .ambient-bg {
+      position: absolute;
+      top: -20%;
+      left: -20%;
+      width: 140%;
+      height: 140%;
+      background-size: cover;
+      background-position: center;
+      filter: blur(65px) brightness(0.35) saturate(1.5);
+      opacity: 0.85;
+      z-index: 0;
+      transition: background-image 0.8s ease-in-out;
+      transform: translateZ(0);
+      pointer-events: none;
+    }
+
+    .ambient-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 50% 30%, transparent 0%, rgba(18, 18, 18, 0.85) 75%, var(--bg) 100%);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Main Container */
+    .container {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: env(safe-area-inset-top, 16px) 24px env(safe-area-inset-bottom, 20px) 24px;
+      justify-content: space-between;
+      max-width: 480px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 12px;
+      padding-bottom: 8px;
+    }
+
+    .device-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: all 0.3s ease;
+    }
+
+    .device-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #e5a50a;
+      box-shadow: 0 0 8px #e5a50a;
+      transition: all 0.3s ease;
+    }
+
+    .device-pill.connected {
+      color: #fff;
+    }
+
+    .device-pill.connected .dot {
+      background-color: var(--green);
+      box-shadow: 0 0 10px var(--green);
+    }
+
+    .device-pill.disconnected .dot {
+      background-color: #ff3b30;
+      box-shadow: 0 0 8px #ff3b30;
+    }
+
+    .wakelock-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.2s;
+    }
+
+    .wakelock-btn.active {
+      color: #ffd700;
+    }
+
+    /* Artwork View */
+    .artwork-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: auto 0;
+      width: 100%;
+    }
+
+    .artwork-card {
+      width: 100%;
+      max-width: 320px;
+      aspect-ratio: 1 / 1;
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      background-color: #1a1a1a;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .artwork-card.playing {
+      transform: scale(1.02);
+    }
+
+    .artwork-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: opacity 0.4s ease;
+    }
+
+    .artwork-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-sub);
+    }
+
+    .artwork-placeholder svg {
+      width: 64px;
+      height: 64px;
+      fill: currentColor;
+    }
+
+    /* Track Info */
+    .track-info {
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .track-details {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .track-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+      letter-spacing: -0.3px;
+    }
+
+    .track-artist {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .like-btn, .dislike-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      transition: transform 0.15s, color 0.15s;
+    }
+
+    .like-btn:active, .dislike-btn:active {
+      transform: scale(0.85);
+    }
+
+    .like-btn.active {
+      color: var(--green);
+    }
+
+    .dislike-btn.active {
+      color: var(--accent);
+    }
+
+    /* Scrubber / Progress Bar */
+    .scrubber-section {
+      margin-bottom: 16px;
+    }
+
+    .progress-bar-container {
+      width: 100%;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .progress-bar-track {
+      width: 100%;
+      height: 4px;
+      background: var(--progress-bg);
+      border-radius: 2px;
+      position: relative;
+      overflow: visible;
+      transition: height 0.15s ease;
+    }
+
+    .progress-bar-container:active .progress-bar-track {
+      height: 6px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: #ffffff;
+      border-radius: 2px;
+      width: 0%;
+      position: relative;
+      transition: width 0.1s linear;
+    }
+
+    .progress-thumb {
+      position: absolute;
+      right: -6px;
+      top: 50%;
+      transform: translateY(-50%) scale(0);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+      transition: transform 0.15s ease;
+    }
+
+    .progress-bar-container:hover .progress-thumb,
+    .progress-bar-container:active .progress-thumb {
+      transform: translateY(-50%) scale(1);
+    }
+
+    .time-stamps {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-sub);
+      margin-top: -2px;
+    }
+
+    /* Player Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .control-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      border-radius: 50%;
+      transition: transform 0.15s ease, color 0.15s ease;
+    }
+
+    .control-btn:active {
+      transform: scale(0.85);
+    }
+
+    .control-btn.active {
+      color: var(--green);
+      position: relative;
+    }
+
+    .control-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: 2px;
+      width: 4px;
+      height: 4px;
+      background: var(--green);
+      border-radius: 50%;
+    }
+
+    .play-pause-btn {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      background-color: #ffffff;
+      color: #000000;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      transition: transform 0.15s ease, background-color 0.2s ease;
+    }
+
+    .play-pause-btn:active {
+      transform: scale(0.92);
+      background-color: #ececec;
+    }
+
+    .play-pause-btn svg {
+      width: 28px;
+      height: 28px;
+      fill: currentColor;
+    }
+
+    /* Volume Slider */
+    .volume-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 4px 12px 4px;
+    }
+
+    .volume-btn {
+      background: none;
+      border: none;
+      color: var(--text-sub);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+
+    .volume-slider-container {
+      flex: 1;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .volume-track {
+      width: 100%;
+      height: 4px;
+      background: var(--progress-bg);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .volume-fill {
+      height: 100%;
+      background: var(--text-muted);
+      border-radius: 2px;
+      width: 100%;
+      position: relative;
+    }
+
+    .volume-slider-container:hover .volume-fill,
+    .volume-slider-container:active .volume-fill {
+      background: #ffffff;
+    }
+
+    /* Offline / Alert Banner */
+    .alert-banner {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      right: 20px;
+      max-width: 440px;
+      margin: 0 auto;
+      background: rgba(30, 30, 30, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(16px);
+      padding: 12px 16px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+      transform: translateY(150%);
+      transition: transform 0.4s cubic-bezier(0.2, 0, 0, 1);
+      z-index: 100;
+      font-size: 14px;
+    }
+
+    .alert-banner.show {
+      transform: translateY(0);
+    }
+
+    .alert-icon {
+      color: #e5a50a;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <!-- Ambient background layer -->
+  <div class="ambient-bg" id="ambientBg"></div>
+  <div class="ambient-overlay"></div>
+
+  <!-- Mobile Controller Container -->
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="device-pill" id="devicePill">
+        <span class="dot"></span>
+        <span id="deviceText">Connecting...</span>
+      </div>
+      <button class="wakelock-btn" id="wakeLockBtn" title="Keep screen awake">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Album Art -->
+    <div class="artwork-wrapper">
+      <div class="artwork-card" id="artworkCard">
+        <img class="artwork-img" id="artworkImg" src="" alt="Album Art" style="display: none;">
+        <div class="artwork-placeholder" id="artworkPlaceholder">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+          </svg>
+          <span style="font-size: 14px; font-weight: 500;">No track playing</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Controls Area -->
+    <div class="bottom-section">
+      <!-- Title & Artist -->
+      <div class="track-info">
+        <div class="track-details">
+          <div class="track-title" id="trackTitle">No track playing</div>
+          <div class="track-artist" id="trackArtist">Open YouTube Music on Desktop</div>
+        </div>
+        <div class="track-actions">
+          <button class="dislike-btn" id="dislikeBtn" title="Dislike">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/>
+            </svg>
+          </button>
+          <button class="like-btn" id="likeBtn" title="Like">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.58 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Scrubber -->
+      <div class="scrubber-section">
+        <div class="progress-bar-container" id="progressBar">
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progressFill">
+              <div class="progress-thumb"></div>
+            </div>
+          </div>
+        </div>
+        <div class="time-stamps">
+          <span id="currentTime">0:00</span>
+          <span id="durationTime">0:00</span>
+        </div>
+      </div>
+
+      <!-- Main Playback Controls -->
+      <div class="controls">
+        <button class="control-btn" id="shuffleBtn" title="Shuffle">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+          </svg>
+        </button>
+
+        <button class="control-btn" id="prevBtn" title="Previous">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+          </svg>
+        </button>
+
+        <button class="play-pause-btn" id="playPauseBtn" title="Play / Pause">
+          <svg id="playIcon" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+          <svg id="pauseIcon" viewBox="0 0 24 24" style="display: none;">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+          </svg>
+        </button>
+
+        <button class="control-btn" id="nextBtn" title="Next">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+          </svg>
+        </button>
+
+        <button class="control-btn" id="repeatBtn" title="Repeat">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Volume Slider -->
+      <div class="volume-section">
+        <button class="volume-btn" id="muteBtn" title="Mute">
+          <svg id="volumeIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+          </svg>
+        </button>
+        <div class="volume-slider-container" id="volumeSlider">
+          <div class="volume-track">
+            <div class="volume-fill" id="volumeFill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reconnection Banner -->
+  <div class="alert-banner" id="alertBanner">
+    <div class="alert-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+      </svg>
+    </div>
+    <div id="alertText">YouTube Music is not active on your desktop</div>
+  </div>
+
+  <script>
+    // Elements
+    const ambientBg = document.getElementById('ambientBg');
+    const devicePill = document.getElementById('devicePill');
+    const deviceText = document.getElementById('deviceText');
+    const artworkCard = document.getElementById('artworkCard');
+    const artworkImg = document.getElementById('artworkImg');
+    const artworkPlaceholder = document.getElementById('artworkPlaceholder');
+    const trackTitle = document.getElementById('trackTitle');
+    const trackArtist = document.getElementById('trackArtist');
+    const likeBtn = document.getElementById('likeBtn');
+    const dislikeBtn = document.getElementById('dislikeBtn');
+    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationTimeEl = document.getElementById('durationTime');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const repeatBtn = document.getElementById('repeatBtn');
+    const muteBtn = document.getElementById('muteBtn');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const volumeFill = document.getElementById('volumeFill');
+    const alertBanner = document.getElementById('alertBanner');
+    const alertText = document.getElementById('alertText');
+    const wakeLockBtn = document.getElementById('wakeLockBtn');
+
+    // State
+    let isSeeking = false;
+    let localCurrentTime = 0;
+    let localDuration = 0;
+    let isPlaying = false;
+    let lastStateTime = 0;
+    let animationFrameId = null;
+    let wakeLock = null;
+    let currentVolume = 1;
+    let isMuted = false;
+
+    // Haptic feedback
+    function haptic() {
+      if (navigator.vibrate) {
+        try { navigator.vibrate(12); } catch (e) {}
+      }
+    }
+
+    // Format seconds to mm:ss
+    function formatTime(seconds) {
+      if (!seconds || isNaN(seconds) || seconds < 0) return '0:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+
+    // WebSocket Connection
+    let ws = null;
+    let reconnectTimer = null;
+
+    function connectWs() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${location.host}/ws?client=phone`;
+
+      devicePill.className = 'device-pill';
+      deviceText.textContent = 'Connecting...';
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('Connected to desktop server');
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleServerMessage(data);
+        } catch (err) {
+          console.error('Error handling message:', err);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('Disconnected from desktop server');
+        devicePill.className = 'device-pill disconnected';
+        deviceText.textContent = 'Disconnected';
+        showAlert('Disconnected from Desktop Server. Retrying...');
+        reconnectTimer = setTimeout(connectWs, 2500);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+      };
+    }
+
+    function sendCommand(command, payload = {}) {
+      haptic();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'COMMAND', command, payload }));
+      } else {
+        showAlert('Not connected to Desktop');
+      }
+    }
+
+    function handleServerMessage(msg) {
+      if (msg.type === 'INIT') {
+        updateDesktopStatus(msg.desktopConnected);
+        if (msg.state) updateState(msg.state);
+      } else if (msg.type === 'DESKTOP_STATUS') {
+        updateDesktopStatus(msg.connected);
+        if (msg.state) updateState(msg.state);
+      } else if (msg.type === 'STATE_UPDATE') {
+        if (msg.payload) updateState(msg.payload);
+      } else if (msg.type === 'ERROR') {
+        showAlert(msg.message);
+      }
+    }
+
+    function updateDesktopStatus(connected) {
+      if (connected) {
+        devicePill.className = 'device-pill connected';
+        deviceText.textContent = 'Desktop PC';
+        hideAlert();
+      } else {
+        devicePill.className = 'device-pill disconnected';
+        deviceText.textContent = 'Desktop Offline';
+        showAlert('YouTube Music is not active on your desktop');
+      }
+    }
+
+    function updateState(state) {
+      // Title & Artist
+      if (state.title) trackTitle.textContent = state.title;
+      if (state.artist) {
+        trackArtist.textContent = state.album ? `${state.artist} • ${state.album}` : state.artist;
+      }
+
+      // Artwork
+      if (state.artwork) {
+        if (artworkImg.src !== state.artwork) {
+          artworkImg.src = state.artwork;
+          artworkImg.style.display = 'block';
+          artworkPlaceholder.style.display = 'none';
+          ambientBg.style.backgroundImage = `url('${state.artwork}')`;
+        }
+      } else {
+        artworkImg.style.display = 'none';
+        artworkPlaceholder.style.display = 'flex';
+        ambientBg.style.backgroundImage = 'none';
+      }
+
+      // Play/Pause State
+      isPlaying = !!state.isPlaying;
+      if (isPlaying) {
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+        artworkCard.classList.add('playing');
+      } else {
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        artworkCard.classList.remove('playing');
+      }
+
+      // Like / Dislike
+      likeBtn.classList.toggle('active', !!state.isLiked);
+      dislikeBtn.classList.toggle('active', !!state.isDisliked);
+
+      // Shuffle / Repeat
+      shuffleBtn.classList.toggle('active', !!state.isShuffle);
+      repeatBtn.classList.toggle('active', state.repeatMode && state.repeatMode !== 'NONE');
+
+      // Volume
+      if (typeof state.volume === 'number') {
+        currentVolume = state.volume;
+        isMuted = !!state.isMuted || currentVolume === 0;
+        updateVolumeUI();
+      }
+
+      // Progress & Times
+      if (!isSeeking) {
+        localCurrentTime = typeof state.currentTime === 'number' ? state.currentTime : 0;
+        localDuration = typeof state.duration === 'number' ? state.duration : 0;
+        lastStateTime = performance.now();
+        updateProgressUI();
+      }
+    }
+
+    function updateProgressUI() {
+      const pct = localDuration > 0 ? Math.min(100, Math.max(0, (localCurrentTime / localDuration) * 100)) : 0;
+      progressFill.style.width = `${pct}%`;
+      currentTimeEl.textContent = formatTime(localCurrentTime);
+      durationTimeEl.textContent = formatTime(localDuration);
+    }
+
+    function updateVolumeUI() {
+      const volPct = isMuted ? 0 : Math.round(currentVolume * 100);
+      volumeFill.style.width = `${volPct}%`;
+    }
+
+    // Smooth client-side timer interpolation while playing
+    function tick() {
+      if (isPlaying && !isSeeking && localDuration > 0) {
+        const now = performance.now();
+        const delta = (now - lastStateTime) / 1000;
+        if (delta > 0 && delta < 2) {
+          localCurrentTime += delta;
+          if (localCurrentTime > localDuration) localCurrentTime = localDuration;
+          updateProgressUI();
+        }
+        lastStateTime = now;
+      }
+      animationFrameId = requestAnimationFrame(tick);
+    }
+    animationFrameId = requestAnimationFrame(tick);
+
+    // Controls Event Listeners
+    playPauseBtn.addEventListener('click', () => sendCommand('toggle_play'));
+    nextBtn.addEventListener('click', () => sendCommand('next'));
+    prevBtn.addEventListener('click', () => sendCommand('prev'));
+    likeBtn.addEventListener('click', () => sendCommand('like'));
+    dislikeBtn.addEventListener('click', () => sendCommand('dislike'));
+    shuffleBtn.addEventListener('click', () => sendCommand('shuffle'));
+    repeatBtn.addEventListener('click', () => sendCommand('repeat'));
+
+    // Seeking on progress bar
+    function seekFromEvent(e) {
+      if (!localDuration) return;
+      const rect = progressBar.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      localCurrentTime = pos * localDuration;
+      updateProgressUI();
+    }
+
+    progressBar.addEventListener('mousedown', (e) => {
+      isSeeking = true;
+      seekFromEvent(e);
+      const onMove = (moveEvt) => seekFromEvent(moveEvt);
+      const onUp = (upEvt) => {
+        isSeeking = false;
+        seekFromEvent(upEvt);
+        sendCommand('seek', { time: localCurrentTime });
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+
+    progressBar.addEventListener('touchstart', (e) => {
+      isSeeking = true;
+      seekFromEvent(e);
+    }, { passive: true });
+
+    progressBar.addEventListener('touchmove', (e) => {
+      if (isSeeking) seekFromEvent(e);
+    }, { passive: true });
+
+    progressBar.addEventListener('touchend', () => {
+      if (isSeeking) {
+        isSeeking = false;
+        sendCommand('seek', { time: localCurrentTime });
+      }
+    });
+
+    // Volume Slider
+    function volumeFromEvent(e) {
+      const rect = volumeSlider.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      currentVolume = pos;
+      isMuted = pos === 0;
+      updateVolumeUI();
+      sendCommand('volume', { volume: currentVolume });
+    }
+
+    volumeSlider.addEventListener('click', volumeFromEvent);
+    muteBtn.addEventListener('click', () => {
+      isMuted = !isMuted;
+      updateVolumeUI();
+      sendCommand('volume', { volume: isMuted ? 0 : (currentVolume || 0.8) });
+    });
+
+    // WakeLock API (Keep phone screen on)
+    async function toggleWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          if (!wakeLock) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLockBtn.classList.add('active');
+            wakeLock.addEventListener('release', () => {
+              wakeLock = null;
+              wakeLockBtn.classList.remove('active');
+            });
+          } else {
+            await wakeLock.release();
+            wakeLock = null;
+            wakeLockBtn.classList.remove('active');
+          }
+        }
+      } catch (err) {
+        console.warn('Wake Lock error:', err);
+      }
+    }
+    wakeLockBtn.addEventListener('click', toggleWakeLock);
+
+    // Auto-request wake lock on first user interaction if possible
+    document.addEventListener('click', () => {
+      if (!wakeLock && 'wakeLock' in navigator) {
+        toggleWakeLock();
+      }
+    }, { once: true });
+
+    // Alert Banner Helper
+    let alertTimeout = null;
+    function showAlert(text, duration = 4000) {
+      alertText.textContent = text;
+      alertBanner.classList.add('show');
+      if (alertTimeout) clearTimeout(alertTimeout);
+      if (duration > 0) {
+        alertTimeout = setTimeout(hideAlert, duration);
+      }
+    }
+
+    function hideAlert() {
+      alertBanner.classList.remove('show');
+    }
+
+    // Start WebSocket
+    connectWs();
+  </script>
+</body>
+</html>
