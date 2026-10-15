@@ -1,30 +1,24 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const cloudDot = document.getElementById('cloudDot');
-  const cloudStatusText = document.getElementById('cloudStatusText');
-  const ytmDot = document.getElementById('ytmDot');
-  const ytmStatusText = document.getElementById('ytmStatusText');
-  const roomCodeDisplay = document.getElementById('roomCodeDisplay');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
   const qrCanvas = document.getElementById('qrCanvas');
-  const urlText = document.getElementById('urlText');
-  const copyBtn = document.getElementById('copyBtn');
-  const regenBtn = document.getElementById('regenBtn');
   const openYtmBtn = document.getElementById('openYtmBtn');
   const miniPlayer = document.getElementById('miniPlayer');
   const miniThumb = document.getElementById('miniThumb');
   const miniTitle = document.getElementById('miniTitle');
   const miniArtist = document.getElementById('miniArtist');
-  const settingsToggle = document.getElementById('settingsToggle');
-  const settingsPanel = document.getElementById('settingsPanel');
-  const webAppUrlInput = document.getElementById('webAppUrlInput');
-  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 
-  let currentFullUrl = '';
-  let currentRoomId = '';
+  const WEB_APP_URL = 'https://surya467.github.io/ytmusic-remote';
+  let renderedRoomId = '';
 
-  function renderQR(url) {
-    if (window.QRCode && qrCanvas) {
-      QRCode.toCanvas(qrCanvas, url, {
-        width: 150,
+  function renderQR(roomId) {
+    if (window.QRCode && qrCanvas && roomId) {
+      if (renderedRoomId === roomId) return;
+      renderedRoomId = roomId;
+
+      const fullUrl = `${WEB_APP_URL}/#room=${roomId}`;
+      QRCode.toCanvas(qrCanvas, fullUrl, {
+        width: 170,
         margin: 1,
         color: {
           dark: '#000000',
@@ -36,55 +30,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function updateUI(status) {
+  function updateStatus(status) {
     if (!status) return;
 
-    // Cloud Relay Status
-    if (status.isConnected) {
-      cloudDot.className = 'dot green';
-      cloudStatusText.textContent = 'Connected (Global)';
-    } else {
-      cloudDot.className = 'dot';
-      cloudStatusText.textContent = 'Connecting...';
+    // 1. YouTube Music Tab is not open -> Red
+    if (!status.ytmConnected) {
+      statusDot.className = 'status-dot red';
+      statusText.textContent = 'YouTube Music is not open';
+    }
+    // 2. Tab is open, but phone has not connected -> Yellow
+    else if (!status.phoneConnected) {
+      statusDot.className = 'status-dot yellow';
+      statusText.textContent = 'Not connected';
+    }
+    // 3. Phone is connected -> Green
+    else {
+      statusDot.className = 'status-dot green';
+      statusText.textContent = 'Connected';
     }
 
-    // YouTube Music Tab Status
-    if (status.ytmConnected) {
-      ytmDot.className = 'dot green';
-      ytmStatusText.textContent = 'Tab Connected';
-
-      if (status.lastState && status.lastState.title) {
-        showMiniPlayer(status.lastState);
-      }
-    } else {
-      ytmDot.className = 'dot red';
-      ytmStatusText.textContent = 'Tab not open';
-    }
-
-    // Room ID & URL
+    // Render QR Code
     if (status.roomId) {
-      currentRoomId = status.roomId;
-      roomCodeDisplay.textContent = 'ROOM: ' + status.roomId.toUpperCase().replace('YTM_', '');
-      
-      const baseUrl = status.webAppUrl || 'https://dexter.github.io/ytmusic-remote';
-      currentFullUrl = `${baseUrl.replace(/\/$/, '')}/#room=${status.roomId}`;
-      urlText.textContent = currentFullUrl;
-      webAppUrlInput.value = baseUrl;
+      renderQR(status.roomId);
+    }
 
-      renderQR(currentFullUrl);
+    // Mini Player
+    if (status.lastState && status.lastState.title && status.lastState.title !== 'No track playing') {
+      showMiniPlayer(status.lastState);
+    } else {
+      miniPlayer.style.display = 'none';
     }
   }
 
   function fetchStatus() {
     chrome.runtime.sendMessage({ action: 'GET_STATUS' }, (res) => {
       if (!chrome.runtime.lastError && res) {
-        updateUI(res);
+        updateStatus(res);
       }
     });
   }
 
   function showMiniPlayer(state) {
-    if (!state || !state.title) return;
     miniTitle.textContent = state.title;
     miniArtist.textContent = state.artist || 'YouTube Music';
     if (state.artwork) {
@@ -96,58 +82,30 @@ document.addEventListener('DOMContentLoaded', () => {
     miniPlayer.style.display = 'flex';
   }
 
-  // Copy link
-  copyBtn.addEventListener('click', () => {
-    if (!currentFullUrl) return;
-    navigator.clipboard.writeText(currentFullUrl).then(() => {
-      copyBtn.textContent = 'Copied!';
-      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
-    });
-  });
+  // Robust "Open YouTube Music" button handler
+  openYtmBtn.addEventListener('click', (e) => {
+    e.preventDefault();
 
-  // Regenerate Room
-  regenBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ action: 'REGENERATE_ROOM' }, (res) => {
-      if (res && res.success) {
-        fetchStatus();
-      }
-    });
-  });
-
-  // Open YouTube Music
-  openYtmBtn.addEventListener('click', () => {
-    chrome.tabs.query({ url: '*://music.youtube.com/*' }, (tabs) => {
-      if (tabs.length > 0) {
-        chrome.tabs.update(tabs[0].id, { active: true });
-      } else {
-        chrome.tabs.create({ url: 'https://music.youtube.com' });
-      }
-    });
-  });
-
-  // Settings toggle
-  settingsToggle.addEventListener('click', () => {
-    const isVisible = settingsPanel.style.display === 'block';
-    settingsPanel.style.display = isVisible ? 'none' : 'block';
-  });
-
-  saveSettingsBtn.addEventListener('click', () => {
-    let newUrl = webAppUrlInput.value.trim();
-    if (newUrl) {
-      // Auto-correct github.com repository link to github.io pages link if user entered github.com
-      const ghRepoMatch = newUrl.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/?$/i);
-      if (ghRepoMatch) {
-        newUrl = `https://${ghRepoMatch[1]}.github.io/${ghRepoMatch[2]}`;
-      }
-
-      chrome.runtime.sendMessage({ action: 'SET_WEBAPP_URL', url: newUrl }, (res) => {
-        settingsPanel.style.display = 'none';
-        fetchStatus();
+    try {
+      chrome.tabs.query({ url: '*://music.youtube.com/*' }, (tabs) => {
+        if (chrome.runtime.lastError || !tabs || tabs.length === 0) {
+          chrome.tabs.create({ url: 'https://music.youtube.com/' });
+        } else {
+          const targetTab = tabs[0];
+          chrome.tabs.update(targetTab.id, { active: true }, () => {
+            if (targetTab.windowId !== undefined) {
+              chrome.windows.update(targetTab.windowId, { focused: true });
+            }
+          });
+        }
       });
+    } catch (err) {
+      // Fallback
+      window.open('https://music.youtube.com/', '_blank');
     }
   });
 
-  // Initial & interval refresh
+  // Initial fetch and poll
   fetchStatus();
-  setInterval(fetchStatus, 2000);
+  setInterval(fetchStatus, 1500);
 });

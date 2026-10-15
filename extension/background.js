@@ -1,6 +1,8 @@
 // Background Service Worker - Cloud MQTT Bridge (using Paho MQTT)
 importScripts('lib/paho-mqtt.js');
 
+const WEB_APP_URL = 'https://surya467.github.io/ytmusic-remote';
+
 const BROKERS = [
   { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
   { host: 'broker.emqx.io', port: 8084, path: '/mqtt' }
@@ -10,10 +12,11 @@ let currentBrokerIndex = 0;
 let client = null;
 let contentPort = null;
 let roomId = '';
-let webAppUrl = 'https://surya467.github.io/ytmusic-remote';
 let cachedState = null;
 let isConnected = false;
 let isConnecting = false;
+let phoneConnected = false;
+let lastPhonePing = 0;
 
 // Generate clean unique room ID
 function generateRoomId() {
@@ -27,22 +30,12 @@ function generateRoomId() {
 
 // Load configuration
 function initConfig(callback) {
-  chrome.storage.local.get(['roomId', 'webAppUrl'], (res) => {
+  chrome.storage.local.get(['roomId'], (res) => {
     if (!res.roomId) {
       roomId = generateRoomId();
       chrome.storage.local.set({ roomId });
     } else {
       roomId = res.roomId;
-    }
-
-    if (res.webAppUrl) {
-      const match = res.webAppUrl.match(/^https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/?$/i);
-      if (match) {
-        webAppUrl = `https://${match[1]}.github.io/${match[2]}`;
-        chrome.storage.local.set({ webAppUrl });
-      } else {
-        webAppUrl = res.webAppUrl;
-      }
     }
 
     console.log(`[Background] Initialized Room: ${roomId}`);
@@ -68,6 +61,7 @@ function connectMqtt() {
     client.onConnectionLost = (responseObject) => {
       isConnected = false;
       isConnecting = false;
+      phoneConnected = false;
       console.warn('[Background] Broker connection lost:', responseObject.errorMessage);
       setTimeout(connectMqtt, 3000);
     };
@@ -77,11 +71,20 @@ function connectMqtt() {
         const msg = JSON.parse(message.payloadString);
         console.log('[Background] Received phone command:', msg);
 
-        if (msg.action === 'REQUEST_STATE') {
+        if (msg.action === 'PHONE_DISCONNECTED') {
+          phoneConnected = false;
+          return;
+        }
+
+        // Any message or ping indicates active phone connection
+        phoneConnected = true;
+        lastPhonePing = Date.now();
+
+        if (msg.action === 'REQUEST_STATE' || msg.action === 'PHONE_CONNECTED') {
           if (cachedState) {
             publishState(cachedState);
           }
-        } else if (contentPort) {
+        } else if (msg.action !== 'PING' && contentPort) {
           contentPort.postMessage({
             type: 'COMMAND',
             command: msg.action,
@@ -117,7 +120,6 @@ function connectMqtt() {
         isConnected = false;
         isConnecting = false;
         console.warn(`[Background] Connection to ${target.host} failed:`, err.errorMessage || err);
-        // Switch broker on failure
         currentBrokerIndex = (currentBrokerIndex + 1) % BROKERS.length;
         setTimeout(connectMqtt, 3000);
       }
@@ -144,6 +146,13 @@ function publishState(state) {
     }
   }
 }
+
+// Check for phone timeout
+setInterval(() => {
+  if (phoneConnected && Date.now() - lastPhonePing > 20000) {
+    phoneConnected = false;
+  }
+}, 5000);
 
 // Port connection to YouTube Music content script
 chrome.runtime.onConnect.addListener((port) => {
@@ -173,25 +182,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({
       isConnected,
       roomId,
-      webAppUrl,
+      webAppUrl: WEB_APP_URL,
       ytmConnected: contentPort !== null,
+      phoneConnected: phoneConnected && (Date.now() - lastPhonePing <= 20000),
       lastState: cachedState
-    });
-    return true;
-  }
-
-  if (request.action === 'SET_WEBAPP_URL') {
-    webAppUrl = request.url;
-    chrome.storage.local.set({ webAppUrl });
-    sendResponse({ success: true, webAppUrl });
-    return true;
-  }
-
-  if (request.action === 'REGENERATE_ROOM') {
-    roomId = generateRoomId();
-    chrome.storage.local.set({ roomId }, () => {
-      connectMqtt();
-      sendResponse({ success: true, roomId });
     });
     return true;
   }

@@ -743,9 +743,16 @@
           const stateTopic = `ytmusic-remote/${roomId}/state`;
           pahoClient.subscribe(stateTopic, {
             onSuccess: () => {
+              sendCommand('PHONE_CONNECTED');
               sendCommand('REQUEST_STATE');
             }
           });
+
+          // Heartbeat ping every 8 seconds to maintain active status on desktop
+          if (window.pingInterval) clearInterval(window.pingInterval);
+          window.pingInterval = setInterval(() => {
+            sendCommand('PING');
+          }, 8000);
         },
         onFailure: (err) => {
           console.warn('Connection failed:', err);
