@@ -2,18 +2,20 @@
 (function () {
   'use strict';
 
-  console.log('[YTMusic Remote] Content script loaded');
+  console.log('[YTMusic Remote] Content script loaded on music.youtube.com');
 
   let port = null;
   let isConnected = false;
-  let pollInterval = null;
   let lastStateJson = '';
 
   function connectToBackground() {
+    if (!chrome.runtime?.id) {
+      return; // Extension context invalidated or reloaded
+    }
+
     try {
       port = chrome.runtime.connect({ name: 'ytm-remote-cs' });
       isConnected = true;
-      console.log('[YTMusic Remote] Connected to extension background worker');
 
       port.onMessage.addListener((msg) => {
         if (msg.type === 'COMMAND') {
@@ -24,16 +26,26 @@
       port.onDisconnect.addListener(() => {
         isConnected = false;
         port = null;
-        console.log('[YTMusic Remote] Disconnected from background worker, retrying in 2s...');
-        setTimeout(connectToBackground, 2000);
+        // Retry silently
+        setTimeout(connectToBackground, 3000);
       });
 
       // Send initial state immediately
       sendStateUpdate(true);
     } catch (err) {
-      console.warn('[YTMusic Remote] Connection error:', err);
-      setTimeout(connectToBackground, 2000);
+      isConnected = false;
+      port = null;
+      setTimeout(connectToBackground, 3000);
     }
+  }
+
+  // Fallback direct message listener
+  if (chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.type === 'COMMAND') {
+        handleCommand(msg.command, msg.payload);
+      }
+    });
   }
 
   function getVideoElement() {
@@ -53,7 +65,7 @@
     let album = '';
     let artwork = '';
 
-    // 1. Try MediaSession (High quality)
+    // 1. MediaSession API (most reliable)
     if (navigator.mediaSession && navigator.mediaSession.metadata) {
       const meta = navigator.mediaSession.metadata;
       if (meta.title) title = meta.title;
@@ -64,7 +76,7 @@
       }
     }
 
-    // 2. Fallback to DOM elements if MediaSession is incomplete
+    // 2. DOM elements fallback
     if (playerBar) {
       if (!title) {
         const titleEl = playerBar.querySelector('.title.ytmusic-player-bar') ||
@@ -150,27 +162,39 @@
   }
 
   function sendStateUpdate(force = false) {
-    if (!port || !isConnected) return;
+    if (!chrome.runtime?.id) return;
 
     const state = extractState();
-    // Compare significant fields to avoid spamming
     const stateJson = JSON.stringify(state);
 
     if (force || stateJson !== lastStateJson) {
       lastStateJson = stateJson;
-      try {
-        port.postMessage({
-          type: 'STATE_UPDATE',
-          payload: state
-        });
-      } catch (err) {
-        console.warn('[YTMusic Remote] Error posting state:', err);
+
+      if (port && isConnected) {
+        try {
+          port.postMessage({
+            type: 'STATE_UPDATE',
+            payload: state
+          });
+          return;
+        } catch (err) {
+          isConnected = false;
+        }
       }
+
+      // Fallback message
+      try {
+        chrome.runtime.sendMessage({
+          action: 'CONTENT_SCRIPT_STATE',
+          payload: state
+        }, () => {
+          if (chrome.runtime.lastError) { /* ignore */ }
+        });
+      } catch (e) {}
     }
   }
 
   function handleCommand(command, payload) {
-    console.log('[YTMusic Remote] Executing command:', command, payload);
     const video = getVideoElement();
     const playerBar = getPlayerBar();
 
@@ -262,11 +286,9 @@
       }
     }
 
-    // Send immediate state update after command execution
     setTimeout(() => sendStateUpdate(true), 150);
   }
 
-  // Hook into video events for zero-latency updates
   function attachVideoListeners() {
     const video = getVideoElement();
     if (video) {
@@ -276,12 +298,10 @@
     }
   }
 
-  // Setup periodic polling & video checking
   setInterval(() => {
     attachVideoListeners();
     sendStateUpdate(false);
   }, 500);
 
-  // Initialize
   connectToBackground();
 })();

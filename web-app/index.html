@@ -493,7 +493,7 @@
       cursor: pointer;
     }
   </style>
-  <script src="mqtt.min.js"></script>
+  <script src="paho-mqtt.js"></script>
 </head>
 <body>
   <!-- Ambient background layer -->
@@ -628,7 +628,6 @@
   </div>
 
   <script>
-    // Elements
     const ambientBg = document.getElementById('ambientBg');
     const devicePill = document.getElementById('devicePill');
     const deviceText = document.getElementById('deviceText');
@@ -658,7 +657,6 @@
     const roomInput = document.getElementById('roomInput');
     const roomSubmit = document.getElementById('roomSubmit');
 
-    // Extract Room ID from URL
     function getRoomId() {
       const hash = location.hash.replace('#', '');
       const params = new URLSearchParams(hash || location.search);
@@ -679,7 +677,6 @@
       });
     }
 
-    // State
     let isSeeking = false;
     let localCurrentTime = 0;
     let localDuration = 0;
@@ -689,7 +686,7 @@
     let wakeLock = null;
     let currentVolume = 1;
     let isMuted = false;
-    let mqttClient = null;
+    let pahoClient = null;
 
     function haptic() {
       if (navigator.vibrate) {
@@ -704,77 +701,84 @@
       return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
     }
 
-    // Cloud MQTT Connection
     function initMqtt() {
       if (!roomId) return;
 
-      const brokerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+      const host = 'broker.hivemq.com';
+      const port = 8884;
+      const path = '/mqtt';
       const clientId = 'ytm_phone_' + Math.random().toString(16).substring(2, 10);
-      
+
       devicePill.className = 'device-pill';
       deviceText.textContent = 'Connecting...';
 
       console.log('Connecting to Cloud Broker for Room:', roomId);
-      mqttClient = mqtt.connect(brokerUrl, {
-        clientId,
-        keepalive: 30,
-        reconnectPeriod: 2500,
-        clean: true
-      });
+      pahoClient = new Paho.Client(host, port, path, clientId);
 
-      const stateTopic = `ytmusic-remote/${roomId}/state`;
-      const cmdTopic = `ytmusic-remote/${roomId}/cmd`;
+      pahoClient.onConnectionLost = (responseObject) => {
+        console.warn('Connection lost:', responseObject.errorMessage);
+        devicePill.className = 'device-pill disconnected';
+        deviceText.textContent = 'Reconnecting...';
+        setTimeout(initMqtt, 3000);
+      };
 
-      mqttClient.on('connect', () => {
-        console.log('Connected to broker');
-        devicePill.className = 'device-pill connected';
-        deviceText.textContent = 'Desktop PC';
-
-        mqttClient.subscribe(stateTopic, { qos: 0 }, (err) => {
-          if (!err) {
-            // Request immediate playback state
-            sendCommand('REQUEST_STATE');
-          }
-        });
-      });
-
-      mqttClient.on('message', (topic, message) => {
+      pahoClient.onMessageArrived = (message) => {
         try {
-          const state = JSON.parse(message.toString());
+          const state = JSON.parse(message.payloadString);
           updateState(state);
         } catch (e) {
           console.error('Error parsing state:', e);
         }
-      });
+      };
 
-      mqttClient.on('offline', () => {
-        devicePill.className = 'device-pill disconnected';
-        deviceText.textContent = 'Reconnecting...';
-      });
+      pahoClient.connect({
+        useSSL: true,
+        timeout: 10,
+        cleanSession: true,
+        onSuccess: () => {
+          console.log('Connected to broker');
+          devicePill.className = 'device-pill connected';
+          deviceText.textContent = 'Desktop PC';
 
-      mqttClient.on('error', (err) => {
-        console.warn('MQTT error:', err);
+          const stateTopic = `ytmusic-remote/${roomId}/state`;
+          pahoClient.subscribe(stateTopic, {
+            onSuccess: () => {
+              sendCommand('REQUEST_STATE');
+            }
+          });
+        },
+        onFailure: (err) => {
+          console.warn('Connection failed:', err);
+          devicePill.className = 'device-pill disconnected';
+          deviceText.textContent = 'Retry in 3s';
+          setTimeout(initMqtt, 3000);
+        }
       });
     }
 
     function sendCommand(action, payload = {}) {
       haptic();
-      if (mqttClient && mqttClient.connected && roomId) {
-        const cmdTopic = `ytmusic-remote/${roomId}/cmd`;
-        mqttClient.publish(cmdTopic, JSON.stringify({ action, payload }), { qos: 0 });
+      if (pahoClient && pahoClient.isConnected() && roomId) {
+        try {
+          const cmdTopic = `ytmusic-remote/${roomId}/cmd`;
+          const msg = new Paho.Message(JSON.stringify({ action, payload }));
+          msg.destinationName = cmdTopic;
+          msg.qos = 0;
+          pahoClient.send(msg);
+        } catch (e) {
+          console.warn('Failed to send command:', e);
+        }
       }
     }
 
     function updateState(state) {
       if (!state) return;
 
-      // Title & Artist
       if (state.title) trackTitle.textContent = state.title;
       if (state.artist) {
         trackArtist.textContent = state.album ? `${state.artist} • ${state.album}` : state.artist;
       }
 
-      // Artwork
       if (state.artwork) {
         if (artworkImg.src !== state.artwork) {
           artworkImg.src = state.artwork;
@@ -788,7 +792,6 @@
         ambientBg.style.backgroundImage = 'none';
       }
 
-      // Play/Pause State
       isPlaying = !!state.isPlaying;
       if (isPlaying) {
         playIcon.style.display = 'none';
@@ -800,22 +803,18 @@
         artworkCard.classList.remove('playing');
       }
 
-      // Like / Dislike
       likeBtn.classList.toggle('active', !!state.isLiked);
       dislikeBtn.classList.toggle('active', !!state.isDisliked);
 
-      // Shuffle / Repeat
       shuffleBtn.classList.toggle('active', !!state.isShuffle);
       repeatBtn.classList.toggle('active', state.repeatMode && state.repeatMode !== 'NONE');
 
-      // Volume
       if (typeof state.volume === 'number') {
         currentVolume = state.volume;
         isMuted = !!state.isMuted || currentVolume === 0;
         updateVolumeUI();
       }
 
-      // Progress & Times
       if (!isSeeking) {
         localCurrentTime = typeof state.currentTime === 'number' ? state.currentTime : 0;
         localDuration = typeof state.duration === 'number' ? state.duration : 0;
@@ -836,7 +835,6 @@
       volumeFill.style.width = `${volPct}%`;
     }
 
-    // Smooth client-side timer interpolation while playing
     function tick() {
       if (isPlaying && !isSeeking && localDuration > 0) {
         const now = performance.now();
@@ -852,7 +850,6 @@
     }
     animationFrameId = requestAnimationFrame(tick);
 
-    // Controls Event Listeners
     playPauseBtn.addEventListener('click', () => sendCommand('toggle_play'));
     nextBtn.addEventListener('click', () => sendCommand('next'));
     prevBtn.addEventListener('click', () => sendCommand('prev'));
@@ -861,7 +858,6 @@
     shuffleBtn.addEventListener('click', () => sendCommand('shuffle'));
     repeatBtn.addEventListener('click', () => sendCommand('repeat'));
 
-    // Seeking on progress bar
     function seekFromEvent(e) {
       if (!localDuration) return;
       const rect = progressBar.getBoundingClientRect();
@@ -902,7 +898,6 @@
       }
     });
 
-    // Volume Slider
     function volumeFromEvent(e) {
       const rect = volumeSlider.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -920,7 +915,6 @@
       sendCommand('volume', { volume: isMuted ? 0 : (currentVolume || 0.8) });
     });
 
-    // WakeLock API (Keep phone screen on)
     async function toggleWakeLock() {
       try {
         if ('wakeLock' in navigator) {
